@@ -16,8 +16,14 @@ from file_utils import preprocess
 
 class PPOPolicy(nn.Module):
     """
-    PPO-clip implementation, heavily based on the PPO policy implemented in Stable Baselines 3 
-    and this implementation: https://medium.com/analytics-vidhya/coding-ppo-from-scratch-with-pytorch-part-1-4-613dfc1b14c8.
+    PPO-clip implementation, heavily based on the PPO policy implemented in:
+    
+    - Stable Baselines 3 
+    - https://medium.com/analytics-vidhya/coding-ppo-from-scratch-with-pytorch-part-1-4-613dfc1b14c8.
+    
+    The overall training architecture had to be changed to fit the structure of ViZDoom, which does
+    not use methods such as OpenAI Gym's env.reset() and env.step(action) (unless you use an env 
+    wrapper).
     """
     def __init__(self, env, action_dim, batch_size):
         super(PPOPolicy, self).__init__()
