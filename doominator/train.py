@@ -2,6 +2,8 @@
 
 This file contains the implementation of the PPO algorithm and the training
 procedure. The resulting model is saved in the "models" folder.
+
+@author: Rodrigo Pereira
 """
 import os
 import torch

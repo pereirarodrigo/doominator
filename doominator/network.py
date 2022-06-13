@@ -2,6 +2,8 @@
 
 This file contains the implementation of a convolutional neural network that
 will be used as the actor and critic networks of the PPO algorithm.
+
+@author: Rodrigo Pereira
 """
 import torch
 import numpy as np

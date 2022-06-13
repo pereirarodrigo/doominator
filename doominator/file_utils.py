@@ -2,7 +2,12 @@
 
 The functions in this file are auxiliary in nature, and meant for 
 preprocessing game frames and launching ViZDoom game instances for 
-training and testing.
+training and testing. 
+
+This code was adapted from ViZDoom's PyTorch training example, available 
+here: https://github.com/mwydmuch/ViZDoom/blob/master/examples/python/learning_pytorch.py
+
+@author: Rodrigo Pereira
 """
 import vizdoom
 import numpy as np

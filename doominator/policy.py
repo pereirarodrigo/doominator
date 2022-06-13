@@ -5,6 +5,8 @@ This file implements the policy used by Doominator, the PPO algorithm
 specifically, the variant used here is PPO-Clip, which does not have
 a KL-divergence (something like a measure of the distance between two 
 probability distributions) term in the objective and has no constraint.
+
+@author: Rodrigo Pereira
 """
 import torch
 import numpy as np
