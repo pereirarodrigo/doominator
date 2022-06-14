@@ -24,6 +24,7 @@ def train(cfg_path, cfg_name, n_timesteps):
     env = create_game(cfg_path)
     n = env.get_available_buttons_size()
     actions = [list(a) for a in it.product([0, 1], repeat=n)]
+    save_path = f"models/{cfg_name}_agent"
 
     agent = PPOPolicy(
         env=env, 
@@ -35,8 +36,9 @@ def train(cfg_path, cfg_name, n_timesteps):
     agent.learn(n_timesteps)
 
     # Saving the trained agent.
-    torch.save(agent.actor.state_dict(), f"models/{cfg_name}_agent/actor.pt")
-    torch.save(agent.critic.state_dict(), f"models/{cfg_name}_agent/critic.pt")
+    os.mkdir(save_path)
+    torch.save(f"{save_path}/actor.pt")
+    torch.save(f"{save_path}/critic.pt")
 
 
 if __name__ == "__main__":
@@ -44,5 +46,5 @@ if __name__ == "__main__":
     cfg_path = os.path.join(vizdoom.scenarios_path, f"{name}.cfg")
 
     # Training the agent.
-    train(cfg_path, name, n_timesteps=10)
+    train(cfg_path, name, n_timesteps=10000)
 

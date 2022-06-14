@@ -14,6 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from network import CNN
+from tqdm import trange
 from file_utils import preprocess
 
 class PPOPolicy(nn.Module):
@@ -43,8 +44,8 @@ class PPOPolicy(nn.Module):
         self.critic = CNN(output_size=1).to(self.device)
 
         # Defining the actor and critic optimizers.
-        self.actor_optim = optim.Adam(self.actor.parameters(), lr=self.learning_rate)
-        self.critic_optim = optim.Adam(self.critic.parameters(), lr=self.learning_rate)
+        self.actor_optim = optim.SGD(self.actor.parameters(), lr=self.learning_rate)
+        self.critic_optim = optim.SGD(self.critic.parameters(), lr=self.learning_rate)
 
         # Initializing a covariance matrix for the exploration process.
         self.cov_var = torch.full(size=(self.action_dim, ), fill_value=0.5)
@@ -53,13 +54,10 @@ class PPOPolicy(nn.Module):
 
     def init_hyperparameters(self):
         # Initializes the policy's hyperparameters.
-        self.learning_rate = 1e-3
+        self.learning_rate = 1e-4
         self.gamma = 0.99
-        self.epsilon = 1
-        self.epsilon_decay = 0.9996
-        self.epsilon_min = 0.1
-        self.max_timesteps_per_batch = 4800
-        self.max_timesteps_per_episode = 1600
+        self.max_timesteps_per_batch = 128
+        self.max_timesteps_per_episode = 1
         self.n_updates_per_iteration = 5
         self.clip = 0.2
 
@@ -69,7 +67,8 @@ class PPOPolicy(nn.Module):
         This function returns the action to be taken given the observation.
         """
         # Querying the actor for a mean action.
-        mean = self.actor(obs).to(self.device)
+        obs = np.expand_dims(obs, axis=0)
+        mean = self.actor(obs)
 
         # Creating a multivariate normal distribution.
         dist = torch.distributions.MultivariateNormal(mean, self.cov_mat)
@@ -96,8 +95,8 @@ class PPOPolicy(nn.Module):
             discounted_reward = 0
 
             for rew in reversed(rewards):
-                discounted_reward = self.gamma * discounted_reward + rew
-                batch_rtgs.append(0, discounted_reward)
+                discounted_reward = rew + discounted_reward * self.gamma
+                batch_rtgs.insert(0, discounted_reward)
 
         # Converting the batch rewards-to-go to a tensor.
         batch_rtgs = torch.tensor(batch_rtgs, dtype=torch.float32)
@@ -116,14 +115,16 @@ class PPOPolicy(nn.Module):
         batch_rewards_tg = []
         batch_lens = []
 
-        for ep in range(self.max_timesteps_per_batch):
+        # Initializing the episode rewards.
+        ep_rewards = []
+
+        for ep in trange(self.max_timesteps_per_batch):
             self.env.new_episode()
 
             ep_rewards = []
-            
+
             # Initializing our observations.
             obs = preprocess(self.env.get_state().screen_buffer) 
-            done = self.env.is_episode_finished()
 
             for ep_t in range(self.max_timesteps_per_episode):
                 batch_obs.append(obs)
@@ -131,21 +132,13 @@ class PPOPolicy(nn.Module):
                 # Computing the action, getting observations and computing rewards.
                 action, log_prob = self.get_action(obs)
                 #obs = preprocess(self.env.get_state().screen_buffer) 
-                reward = self.env.make_action(action, 4)
+                reward = self.env.make_action(action, 12)
                 done = self.env.is_episode_finished()
                 
                 # Collecting the actions, rewards and log probabilities.
                 ep_rewards.append(reward)
                 batch_acts.append(action)
                 batch_log_probs.append(log_prob)
-
-                if not done:
-                    next_obs = preprocess(self.env.get_state().screen_buffer)
-
-                else:
-                    next_obs = np.zeros((1, 30, 45)).astype(np.float32)
-
-                obs = next_obs
 
                 if done:
                     self.env.new_episode()
@@ -154,19 +147,15 @@ class PPOPolicy(nn.Module):
             batch_lens.append(ep_t + 1)    # as timestep starts at 0
             batch_rewards.append(ep_rewards)
 
-            # Printing the results
-            print(f"Episode {ep + 1} avg. reward: {np.mean(ep_rewards):.2f}")
-
         # Reshaping our data as tensors.
-        batch_obs = torch.tensor(batch_obs, dtype=torch.float32)
-        batch_acts = torch.tensor(batch_acts, dtype=torch.float32)
-        batch_log_probs = torch.tensor(batch_log_probs, dtype=torch.float32)
-        batch_rewards = torch.tensor(batch_rewards, dtype=torch.float32)
+        batch_obs = torch.tensor(batch_obs, dtype=torch.float32, device=self.device)
+        batch_acts = torch.tensor(batch_acts, dtype=torch.float32, device=self.device)
+        batch_log_probs = torch.tensor(batch_log_probs, dtype=torch.float32, device=self.device)
 
         # Calculating the batch rewards-to-go.
-        batch_rewards_tg = self.compute_rtgs(batch_rewards)
+        batch_rewards_tg = self.compute_rtgs(batch_rewards).to(self.device)
 
-        return batch_obs, batch_acts, batch_log_probs, batch_rewards, batch_rewards_tg, batch_lens
+        return batch_obs, batch_acts, batch_log_probs, batch_rewards_tg, batch_lens
 
 
     def evaluate(self, batch_obs, batch_acts):
@@ -175,11 +164,11 @@ class PPOPolicy(nn.Module):
         """
         # Querying the critic network for a mean value for each 
         # observation in the batch.
-        V = self.critic(batch_obs)
+        V = self.critic(batch_obs).squeeze()
 
         # Like when getting an action, we query the actor, create a 
         # multivariate normal distribution and return its log prob as well.
-        mean = self.critic(batch_obs)
+        mean = self.actor(batch_obs)
 
         dist = torch.distributions.MultivariateNormal(mean, self.cov_mat)
         log_prob = dist.log_prob(batch_acts)
@@ -192,12 +181,19 @@ class PPOPolicy(nn.Module):
         Function that performs the learning of the policy given a number of
         timesteps.
         """
+        t_so_far = 0
+        it_so_far = 0
+
         for t in range(total_timesteps):
+            it_so_far += 1
+
             # Sample a batch of experiences.
-            obs, acts, log_probs, rewards, rewards_tg, lens = self.rollout()
+            obs, acts, log_probs, rewards_tg, lens = self.rollout()
+
+            t_so_far += np.sum(lens)
 
             # Computing the predicted values.
-            V = self.evaluate(obs, acts)
+            V, _ = self.evaluate(obs, acts)
 
             # Calculating the advantage function.
             A_k = rewards_tg - V.detach()    # once again removing the computation graph
@@ -207,30 +203,33 @@ class PPOPolicy(nn.Module):
 
             for _ in range(self.n_updates_per_iteration):
                 # Computing pi_theta (a_t | s_t)
-                _, curr_log_prob = self.evaluate(obs, acts)
+                V, curr_log_probs = self.evaluate(obs, acts)
 
                 # Calculating ratios.
-                ratios = torch.exp(curr_log_prob - log_probs)
+                ratios = torch.exp(curr_log_probs - log_probs)
 
                 # Calculating surrogate losses.
                 surr1 = ratios * A_k
                 surr2 = torch.clamp(ratios, 1 - self.clip, 1 + self.clip) * A_k
 
-                # Calculating the actor loss.
-                actor_loss = -torch.min(surr1, surr2).mean()
+                # Calculating the actor and critic losses.
+                actor_loss = (-torch.min(surr1, surr2)).mean()
+                critic_loss = F.mse_loss(V, rewards_tg)
 
                 # Calculating gradients and performing backward propagation for the actor.
                 self.actor_optim.zero_grad()
                 actor_loss.backward(retain_graph=True)
                 self.actor_optim.step()
 
-                # Calculating V_phi and phi_theta (a_t | s_t)
-                V, curr_log_prob = self.evaluate(obs, acts)
-
-                # Calculating the critic loss.
-                critic_loss = F.mse_loss(V, rewards_tg)
-
                 # Calculating gradients and performing backward propagation for the critic.
                 self.critic_optim.zero_grad()
                 critic_loss.backward()
                 self.critic_optim.step()
+
+            # Printing the results
+            print(f"\n| Iteration {it_so_far} results:")
+            print(f"|-----------------------------")
+            print(f"| Avg. reward: {torch.mean(rewards_tg):.2f}")
+            print(f"| Max reward: {torch.max(rewards_tg):.2f}")
+            print(f"| Min reward: {torch.min(rewards_tg):.2f}")
+            print(f"| Timesteps: {t_so_far}\n")
