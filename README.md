@@ -7,6 +7,9 @@
 Doominator (a portmanteau of "Doom" and "Terminator") is a reinforcement learning agent trained to play the game Doom through the ViZDoom research platform. It is an ongoing research project aimed at creating an efficient agent that can solve any scenario in the game.
 
 ## Methodology
-The system is based on the following research:
 
-    * [ViZDoom](
+
+## Motivation
+
+
+## Authors
