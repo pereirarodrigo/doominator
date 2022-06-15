@@ -11,12 +11,12 @@ import tianshou as ts
 from network import CNN
 from pprint import pprint
 from vizdoom_env import *
-from tianshou.policy import PPOPolicy
 from tianshou.trainer import onpolicy_trainer
+from tianshou.policy import ICMPolicy, PPOPolicy
 from torch.utils.tensorboard import SummaryWriter
 from tianshou.utils.net.common import ActorCritic 
-from tianshou.utils.net.discrete import Actor, Critic
 from tianshou.data import Collector, VectorReplayBuffer
+from tianshou.utils.net.discrete import Actor, Critic, IntrinsicCuriosityModule
 
 # Using CUDA if it's available.
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -24,6 +24,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Defining some policy hyperparameters.
 LR = 1e-3
 GAMMA = 0.99
+GAE_LAMBDA = 0.95
+MAX_GRAD_NORM = 0.5
+VF_COEF = 0.5
+ENT_COEF = 0.01
 
 # Defining the training config.
 BATCH_SIZE = 32
@@ -33,7 +37,6 @@ STEP_PER_COLLECT = 10
 REPEAT_PER_COLLECT = 4
 TRAIN_NUM = 5
 TEST_NUM = 50
-LOGGER = ts.utils.TensorboardLogger(SummaryWriter("doominator/log/ppo_clip"))
 
 
 def dist(p):
@@ -77,25 +80,55 @@ def train(env_name, n_epochs):
     state_shape = env.observation_space.shape
     action_shape = env.action_space.shape or env.action_space.n
 
-    # Initializing the actor and critic networks.
+    # Initializing the actor, critic and intrinsic curiosity networks.
     net = CNN(*state_shape, action_shape).to(device)
+    feature_net = CNN(*state_shape, action_shape).to(device)
 
     actor = Actor(net, action_shape, device=device, softmax_output=False)
     critic = Critic(net, device=device)
 
-    optimizer = torch.optim.Adam(ActorCritic(actor, critic).parameters(), lr=LR)
+    icm_net = IntrinsicCuriosityModule(
+        feature_net=feature_net.net,
+        feature_dim=feature_net.output_dim,
+        action_dim=np.prod(action_shape), 
+        device=device
+    )
 
-    # Creating the agent.
+    optimizer = torch.optim.Adam(ActorCritic(actor, critic).parameters(), lr=LR)
+    icm_optimizer = torch.optim.Adam(icm_net.parameters(), lr=LR)
+
+    # Creating the PPO policy.
     policy = PPOPolicy(
         actor=actor,
         critic=critic,
         optim=optimizer,
         dist_fn=dist,
-        discount_factor=GAMMA
+        discount_factor=GAMMA, 
+        gae_lambda=GAE_LAMBDA,
+        max_grad_norm=MAX_GRAD_NORM,
+        vf_coef=VF_COEF,
+        ent_coef=ENT_COEF,
+        reward_normalization=False,
+        action_scaling=False,
+        action_space=env.action_space,
+        eps_clip=0.2,
+        value_clip=0,
+        dual_clip=None,
+        advantage_normalization=1,
+        recompute_advantage=0,
     ).to(device)
 
-    # Verifying if the model already exists, so that the training process 
-    # can continue.
+    # Creating the ICM policy
+    policy = ICMPolicy(
+        policy=policy,
+        model=icm_net,
+        optim=icm_optimizer,
+        lr_scale=0.001,
+        reward_scale=0.01,
+        forward_loss_weight=0.2
+    ).to(device)
+
+    # Verifying if we can resume training.
     try:
         policy.load_state_dict(torch.load(os.path.join(save_path, "policy.pth"), map_location=device))
 
@@ -118,6 +151,19 @@ def train(env_name, n_epochs):
     # Training the policy.
     train_collector.collect(n_step=BATCH_SIZE * TRAIN_NUM)
 
+
+    def stop_fn(mean_rewards):
+        """
+        This function stops the training if the mean reward is greater than or equal
+        to the reward threshold.
+        """
+        if env.spec.reward_threshold:
+            return mean_rewards >= env.spec.reward_threshold
+            
+        else:
+            return False
+
+
     result = onpolicy_trainer(
         policy,
         train_collector,
@@ -129,6 +175,7 @@ def train(env_name, n_epochs):
         BATCH_SIZE,
         STEP_PER_COLLECT,
         save_best_fn=save_best_fn(policy, save_path),
+        stop_fn=stop_fn,
         logger=LOGGER,
         test_in_train=False
     )
@@ -138,6 +185,8 @@ def train(env_name, n_epochs):
 
 if __name__ == "__main__":
     name = str(input("Enter the name of the environment: "))
+
+    LOGGER = ts.utils.TensorboardLogger(SummaryWriter(f"doominator/log/{name}_ppo_clip"))
 
     # Training the agent.
     train(name, n_epochs=100)
