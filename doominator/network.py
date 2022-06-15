@@ -13,27 +13,36 @@ import torch.nn.functional as F
 
 class CNN(nn.Module):
     """
-    A convolutional neural network with 3 convolutional layers and 2 fully connected layers.
+    A convolutional neural network with 3 convolutional layers and a fully connected layer.
     """
-    def __init__(self, output_size):
+    def __init__(self, c, h, w, output_size):
         super(CNN, self).__init__()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, stride=2)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=2)
-        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1)
-        self.fc1 = nn.Linear(256 * 8, 512)
-        self.fc2 = nn.Linear(512, output_size)
+        self.net = nn.Sequential(
+            nn.Conv2d(c, 32, kernel_size=3, stride=2),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.Flatten()
+        )
+
+        with torch.no_grad():
+            self.output_dim = np.prod(self.net(torch.zeros(1, c, h, w)).shape[1:])
+
+        self.net = nn.Sequential(
+            self.net,
+            nn.Linear(self.output_dim, output_size),
+            nn.ReLU(inplace=True)
+        )
+
+        self.output_dim = output_size
 
 
-    def forward(self, x):
-        if isinstance(x, np.ndarray):
-            x = torch.tensor(x, dtype=torch.float, device=self.device)
+    def forward(self, obs, state=None, info={}):
+        if isinstance(obs, np.ndarray):
+            obs = torch.tensor(obs, dtype=torch.float, device=self.device)
 
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
-        x = x.view(-1, 256 * 8)
-        x = F.relu(self.fc1(x))
-        x = self.fc2(x)
+        logits = self.net(obs)
         
-        return x
+        return logits, state
