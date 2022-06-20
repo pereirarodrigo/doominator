@@ -8,10 +8,11 @@ procedure. The resulting model is saved in the "models" folder.
 import os
 import torch
 import tianshou as ts
-from network import CNN
+from network import DQN
 from pprint import pprint
 from vizdoom_env import *
 from tianshou.trainer import onpolicy_trainer
+from torch.optim.lr_scheduler import LambdaLR
 from tianshou.policy import ICMPolicy, PPOPolicy
 from torch.utils.tensorboard import SummaryWriter
 from tianshou.utils.net.common import ActorCritic 
@@ -22,7 +23,7 @@ from tianshou.utils.net.discrete import Actor, Critic, IntrinsicCuriosityModule
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Defining some policy hyperparameters.
-LR = 1e-3
+LR = 0.00002
 GAMMA = 0.99
 GAE_LAMBDA = 0.95
 MAX_GRAD_NORM = 0.5
@@ -30,10 +31,10 @@ VF_COEF = 0.5
 ENT_COEF = 0.01
 
 # Defining the training config.
-BATCH_SIZE = 32
-BUFFER_SIZE = 20000
+BATCH_SIZE = 64
+BUFFER_SIZE = 100000
 STEP_PER_EPOCH = 100000
-STEP_PER_COLLECT = 10
+STEP_PER_COLLECT = 1000
 REPEAT_PER_COLLECT = 4
 TRAIN_NUM = 5
 TEST_NUM = 50
@@ -46,19 +47,12 @@ def dist(p):
     return torch.distributions.Categorical(logits=p)
 
 
-def save_best_fn(policy, model_path):
-    """
-    This function saves the best model.
-    """
-    torch.save(policy.state_dict(), os.path.join(model_path, "policy.pth"))
-
-
 def train(env_name, n_epochs):
     """
     This function trains the agent.
     """
     # Creating the model path.
-    save_path = f"doominator/models/{env_name}_ppo_clip"
+    save_path = f"doominator/log/{env_name}_ppo_icm"
 
     try:
         os.mkdir(save_path)
@@ -81,8 +75,8 @@ def train(env_name, n_epochs):
     action_shape = env.action_space.shape or env.action_space.n
 
     # Initializing the actor, critic and intrinsic curiosity networks.
-    net = CNN(*state_shape, action_shape).to(device)
-    feature_net = CNN(*state_shape, action_shape).to(device)
+    net = DQN(*state_shape, action_shape).to(device)
+    feature_net = DQN(*state_shape, action_shape).to(device)
 
     actor = Actor(net, action_shape, device=device, softmax_output=False)
     critic = Critic(net, device=device)
@@ -97,6 +91,14 @@ def train(env_name, n_epochs):
     optimizer = torch.optim.Adam(ActorCritic(actor, critic).parameters(), lr=LR)
     icm_optimizer = torch.optim.Adam(icm_net.parameters(), lr=LR)
 
+    # Performing learning rate decay. 
+    max_update_num = np.ceil(STEP_PER_EPOCH / STEP_PER_COLLECT) * n_epochs
+
+    lr_scheduler = LambdaLR(
+        optimizer, 
+        lr_lambda=lambda epoch: 1 - epoch / max_update_num
+    )
+
     # Creating the PPO policy.
     policy = PPOPolicy(
         actor=actor,
@@ -110,6 +112,7 @@ def train(env_name, n_epochs):
         ent_coef=ENT_COEF,
         reward_normalization=False,
         action_scaling=False,
+        lr_scheduler=lr_scheduler,
         action_space=env.action_space,
         eps_clip=0.2,
         value_clip=0,
@@ -131,6 +134,8 @@ def train(env_name, n_epochs):
     # Verifying if we can resume training.
     try:
         policy.load_state_dict(torch.load(os.path.join(save_path, "policy.pth"), map_location=device))
+
+        print(f"Loaded model from {os.path.join(save_path, 'policy.pth')}, resuming training...")
 
     except FileNotFoundError:
         pass
@@ -164,6 +169,13 @@ def train(env_name, n_epochs):
             return False
 
 
+    def save_best_fn(policy):
+        """
+        This function saves the best model.
+        """
+        torch.save(policy.state_dict(), os.path.join(save_path, "policy.pth"))
+
+
     result = onpolicy_trainer(
         policy,
         train_collector,
@@ -174,7 +186,7 @@ def train(env_name, n_epochs):
         TEST_NUM,
         BATCH_SIZE,
         STEP_PER_COLLECT,
-        save_best_fn=save_best_fn(policy, save_path),
+        save_best_fn=save_best_fn,
         stop_fn=stop_fn,
         logger=LOGGER,
         test_in_train=False
@@ -186,8 +198,8 @@ def train(env_name, n_epochs):
 if __name__ == "__main__":
     name = str(input("Enter the name of the environment: "))
 
-    LOGGER = ts.utils.TensorboardLogger(SummaryWriter(f"doominator/log/{name}_ppo_clip"))
+    LOGGER = ts.utils.TensorboardLogger(SummaryWriter(f"doominator/log/{name}_ppo_icm"))
 
     # Training the agent.
-    train(name, n_epochs=100)
+    train(name, n_epochs=2)
 

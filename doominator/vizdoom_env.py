@@ -47,10 +47,10 @@ def battle_button_comb():
 
 
 class Env(gym.Env):
-    def __init__(self, cfg_path, frameskip=4, res=(4, 40, 60), save_lmp=False):
+    def __init__(self, cfg_path, frameskip=4, res=(4, 84, 84), save_lmp=False):
         super().__init__()
         self.save_lmp = save_lmp
-        self.health_setting = "battle" in cfg_path
+        #self.health_setting = "battle" in cfg_path
 
         if save_lmp:
             os.makedirs("lmps", exist_ok=True)
@@ -63,13 +63,19 @@ class Env(gym.Env):
 
         self.game = vzd.DoomGame()
         self.game.load_config(cfg_path)
+        #self.game.set_window_visible(False)
+        self.game.set_mode(vzd.Mode.PLAYER)
+        self.game.set_screen_format(vzd.ScreenFormat.GRAY8)
+        self.game.set_screen_resolution(vzd.ScreenResolution.RES_640X480)
         self.game.init()
 
-        if "battle" in cfg_path:
-            self.available_actions = battle_button_comb()
+        self.available_actions = battle_button_comb()
 
-        else:
-            self.available_actions = normal_button_comb()
+        # if "battle" in cfg_path:
+        #     self.available_actions = battle_button_comb()
+
+        # else:
+        #     self.available_actions = normal_button_comb()
 
         self.action_num = len(self.available_actions)
         self.action_space = gym.spaces.Discrete(self.action_num)
@@ -84,8 +90,8 @@ class Env(gym.Env):
             return
 
         obs = state.screen_buffer
-        #self.obs_buffer[:-1] = self.obs_buffer[1:]
-        #self.obs_buffer[-1] = cv2.resize(obs, (self.res[-1], self.res[-2]))
+        self.obs_buffer[:-1] = self.obs_buffer[1:]
+        self.obs_buffer[-1] = cv2.resize(obs, (self.res[-1], self.res[-2]))
 
 
     def reset(self):
@@ -111,10 +117,10 @@ class Env(gym.Env):
         self.get_obs()
         health = self.game.get_game_variable(vzd.GameVariable.HEALTH)
 
-        if self.health_setting:
-            reward += health - self.health
+        # if self.health_setting:
+        #     reward += health - self.health
 
-        elif health > self.health:  # positive health reward only for d1/d2
+        if health > self.health:  # positive health reward only for d1/d2
             reward += health - self.health
 
         self.health = health

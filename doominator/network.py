@@ -11,17 +11,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class CNN(nn.Module):
+class DQN(nn.Module):
     """
-    A convolutional neural network with 3 convolutional layers and a fully connected layer.
+    A convolutional deep Q-network.
     """
     def __init__(self, c, h, w, output_size):
-        super(CNN, self).__init__()
+        super(DQN, self).__init__()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.net = nn.Sequential(
-            nn.Conv2d(c, 32, kernel_size=3, stride=2),
+            nn.Conv2d(c, 32, kernel_size=8, stride=4),
             nn.ReLU(inplace=True),
-            nn.Conv2d(32, 64, kernel_size=3, stride=2),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2),
             nn.ReLU(inplace=True),
             nn.Conv2d(64, 64, kernel_size=3, stride=1),
             nn.Flatten()
