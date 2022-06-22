@@ -201,5 +201,5 @@ if __name__ == "__main__":
     LOGGER = ts.utils.TensorboardLogger(SummaryWriter(f"doominator/log/{name}_ppo_icm"))
 
     # Training the agent.
-    train(name, n_epochs=2)
+    train(name, n_epochs=10)
 
