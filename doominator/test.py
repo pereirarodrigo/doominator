@@ -1,7 +1,7 @@
-""" Agent training file.
+""" Agent testing file.
 
-This file contains the implementation of the PPO algorithm and the training
-procedure. The resulting model is saved in the "log" folder.
+This file allows users to watch an agent's performance in a particular
+ViZDoom environment.
 
 @author: Rodrigo Pereira
 """
@@ -36,8 +36,7 @@ BUFFER_SIZE = 100000
 STEP_PER_EPOCH = 100000
 STEP_PER_COLLECT = 1000
 REPEAT_PER_COLLECT = 4
-TRAIN_NUM = 5
-TEST_NUM = 10
+TEST_NUM = 1
 
 
 def dist(p):
@@ -47,9 +46,10 @@ def dist(p):
     return torch.distributions.Categorical(logits=p)
 
 
-def train(env_name, n_epochs):
+def watch(env_name, n_epochs):
     """
-    This function trains the agent.
+    This function allows an user to watch the agent's
+    performance.
     """
     # Creating the model path.
     save_path = f"doominator/log/{env_name}_ppo_icm"
@@ -61,13 +61,13 @@ def train(env_name, n_epochs):
         pass
 
     # Initializing the environment and the agent.
-    env, train_envs, test_envs = make_vizdoom_env(
+    env, test_envs = make_vizdoom_env(
         task=env_name, 
         frame_skip=4, 
         res=(4, 84, 84), 
         save_lmp=False,
         seed=42, 
-        training_num=TRAIN_NUM,
+        training_num=0,
         test_num=TEST_NUM
     )
 
@@ -91,34 +91,12 @@ def train(env_name, n_epochs):
     optimizer = torch.optim.Adam(ActorCritic(actor, critic).parameters(), lr=LR)
     icm_optimizer = torch.optim.Adam(icm_net.parameters(), lr=LR)
 
-    # Performing learning rate decay. 
-    max_update_num = np.ceil(STEP_PER_EPOCH / STEP_PER_COLLECT) * n_epochs
-
-    lr_scheduler = LambdaLR(
-        optimizer, 
-        lr_lambda=lambda epoch: 1 - epoch / max_update_num
-    )
-
     # Creating the PPO policy.
     policy = PPOPolicy(
         actor=actor,
         critic=critic,
         optim=optimizer,
-        dist_fn=dist,
-        discount_factor=GAMMA, 
-        gae_lambda=GAE_LAMBDA,
-        max_grad_norm=MAX_GRAD_NORM,
-        vf_coef=VF_COEF,
-        ent_coef=ENT_COEF,
-        reward_normalization=False,
-        action_scaling=False,
-        lr_scheduler=lr_scheduler,
-        action_space=env.action_space,
-        eps_clip=0.2,
-        value_clip=0,
-        dual_clip=None,
-        advantage_normalization=1,
-        recompute_advantage=0,
+        dist_fn=dist
     ).to(device)
 
     # Creating the ICM policy
@@ -131,75 +109,41 @@ def train(env_name, n_epochs):
         forward_loss_weight=0.2
     ).to(device)
 
-    # Verifying if we can resume training.
+    # Verifying if the agent's model file exists.
     try:
         policy.load_state_dict(torch.load(os.path.join(save_path, "policy.pth"), map_location=device))
 
-        print(f"Loaded model from {os.path.join(save_path, 'policy.pth')}, resuming training...")
+        print(f"Loaded model from {os.path.join(save_path, 'policy.pth')}, putting it into eval mode.")
+
+        policy.eval()
 
     except FileNotFoundError:
-        pass
+        raise FileNotFoundError
 
     # Initializing a replay buffer.
     buffer = VectorReplayBuffer(
         total_size=BUFFER_SIZE,
-        buffer_num=TRAIN_NUM,
+        buffer_num=len(test_envs),
         ignore_obs_next=True,
         save_only_last_obs=True,
         stack_num=4
     )
 
-    # Creating training and testing collectors.
-    train_collector = Collector(policy, train_envs, buffer, exploration_noise=True)
-    test_collector = Collector(policy, test_envs, exploration_noise=False)
+    # Creating a testing collector.
+    test_collector = Collector(policy, test_envs, buffer, exploration_noise=True)
 
-    # Training the policy.
-    train_collector.collect(n_step=BATCH_SIZE * TRAIN_NUM)
+    # Testing the policy.
+    result = test_collector.collect(n_episode=5)
 
+    rew = result["rews"].mean()
+    lens = result["lens"].mean() * 4
 
-    def stop_fn(mean_rewards):
-        """
-        This function stops the training if the mean reward is greater than or equal
-        to the reward threshold.
-        """
-        if env.spec.reward_threshold:
-            return mean_rewards >= env.spec.reward_threshold
-            
-        else:
-            return False
-
-
-    def save_best_fn(policy):
-        """
-        This function saves the best model.
-        """
-        torch.save(policy.state_dict(), os.path.join(save_path, "policy.pth"))
-
-
-    result = onpolicy_trainer(
-        policy,
-        train_collector,
-        test_collector,
-        n_epochs,
-        STEP_PER_EPOCH,
-        REPEAT_PER_COLLECT,
-        TEST_NUM,
-        BATCH_SIZE,
-        STEP_PER_COLLECT,
-        save_best_fn=save_best_fn,
-        stop_fn=stop_fn,
-        logger=LOGGER,
-        test_in_train=False
-    )
-
-    pprint(result)
+    print(f"Mean reward (over {result['n/ep']} episodes): {rew}")
+    print(f"Mean length (over {result['n/ep']} episodes): {lens}")
 
 
 if __name__ == "__main__":
     name = str(input("Enter the name of the environment: "))
 
-    LOGGER = ts.utils.TensorboardLogger(SummaryWriter(f"doominator/log/{name}_ppo_icm"))
-
-    # Training the agent.
-    train(name, n_epochs=6)
-
+    # Watching the agent.
+    watch(name, n_epochs=6)

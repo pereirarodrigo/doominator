@@ -157,16 +157,24 @@ def make_vizdoom_env(task, frame_skip, res, save_lmp, seed, training_num, test_n
     
     cfg_path = f"{vzd.scenarios_path}/{task}.cfg"
     env = Env(cfg_path, frame_skip, res)
-    train_envs = ShmemVectorEnv(
-        [lambda: Env(cfg_path, frame_skip, res) for _ in range(training_num)]
-    )
+
     test_envs = ShmemVectorEnv(
         [
             lambda: Env(cfg_path, frame_skip, res, save_lmp)
             for _ in range(test_num)
         ]
     )
-    train_envs.seed(seed)
+    
     test_envs.seed(seed)
 
-    return env, train_envs, test_envs
+    if training_num > 0:
+        train_envs = ShmemVectorEnv(
+            [lambda: Env(cfg_path, frame_skip, res) for _ in range(training_num)]
+        )
+        
+        train_envs.seed(seed)
+
+        return env, train_envs, test_envs
+
+    else:
+        return env, test_envs
