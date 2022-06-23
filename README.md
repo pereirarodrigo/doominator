@@ -4,7 +4,7 @@
 
 <br>
 
-Doominator (a portmanteau of "Doom" and "Terminator") is a reinforcement learning agent trained to play the game Doom through the ViZDoom research platform. It is an ongoing research project aimed at creating an efficient agent that can solve any scenario in the game.
+Doominator (a portmanteau of "Doom" and "Terminator") is a reinforcement learning agent trained to play the game Doom through the ViZDoom research platform. It is an independent research project aimed at creating an efficient agent that can solve any scenario in the game.
 
 # Implementation
 Much of the code comes from [Tianshou's ViZDoom example](https://github.com/thu-ml/tianshou/tree/master/examples/vizdoom). In essence, Doominator is guided by the joint usage of Proximal Policy Optimization (PPO) and Intrinsic Curiosity Module (commonly known as ICM), which I personally deem the real star of this project.
