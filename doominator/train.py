@@ -1,7 +1,7 @@
 """ Agent training file.
 
 This file contains the implementation of the PPO algorithm and the training
-procedure. The resulting model is saved in the "models" folder.
+procedure. The resulting model is saved in the "log" folder.
 
 @author: Rodrigo Pereira
 """
