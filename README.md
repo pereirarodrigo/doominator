@@ -13,7 +13,7 @@ Much of the code comes from [Tianshou's ViZDoom example](https://github.com/thu-
 
 <center>
 
-<img src="src/icm.png" height="350" width="800" alt="ICM">
+<img src="./src/icm.png" height="350" width="800" alt="ICM">
 
  *Intrinsic Curiosity Module, taken from the <a href="https://pathak22.github.io/noreward-rl/resources/icml17.pdf">paper</a>. As an agent in a certain state executes an action, sampled from its current policy, in the environment, the ICM encodes the current and future states into features, which are used to predict the current action; simultanously, the forward model uses the current action and the feature that corresponds to the current state to predict the next state. The prediction error that arises from these calculations are used as the curiosity-based intrinsic reward signal.*
 
